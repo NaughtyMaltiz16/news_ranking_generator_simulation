@@ -1,0 +1,321 @@
+function doGet(req) {
+  var SHEET_URL = "https://docs.google.com/spreadsheets/d/1PSI6PQf0wLpldAF13AT7SLgY99Ncbz-JZmN-IOf-jfY/edit";
+  var action    = req.parameter.action;
+
+
+  if (action === "nate") {
+    var nateResult = NateTop5(req);   
+    if (req && req.parameter && req.parameter.callback) {
+      return response().jsonp(req, nateResult);
+    } else {
+      return response().json(nateResult);
+    }
+  }
+
+  var table_req = req.parameter.table;
+
+  var db = SpreadsheetApp.openByUrl(SHEET_URL);
+  var table = db.getSheetByName(table_req);
+  var ret;
+
+  switch (action) {
+    case "read":
+      ret = Read(req, table);
+      break;
+    case "insert":
+      ret = Insert(req, table);
+      break;
+    case "update":
+      ret = Update(req, table);
+      break;
+    case "delete":
+      ret = Delete(req, table);
+      break;
+
+    default:
+      ret = { success: false, data: { error: "Unknown action" } };
+  }
+
+  if (req && req.parameter && req.parameter.callback) {
+    return response().jsonp(req, ret);
+  } else {
+    return response().json(ret);
+  }
+}
+
+function doPost(e) {
+  try {
+    var SHEET_URL = "https://docs.google.com/spreadsheets/d/1PSI6PQf0wLpldAF13AT7SLgY99Ncbz-JZmN-IOf-jfY/edit";
+    var db = SpreadsheetApp.openByUrl(SHEET_URL);
+
+    var params = {};
+    if (e.postData && e.postData.type === 'application/json') {
+      params = JSON.parse(e.postData.contents || "{}");
+    } else {
+      params = e.parameter || {};
+      if (params.data) { try { params.data = JSON.parse(params.data); } catch(_) {} }
+    }
+
+    var action = params.action;
+    var table_req = params.table;
+    var table = db.getSheetByName(table_req);
+    if (!table) return response().json({success:false, data:{error:"Sheet '"+table_req+"' not found"}});
+
+    // mimic doGet() for existing Insert/Read/etc functions
+    var req = { parameter: {} };
+    if (params.data && typeof params.data === 'object') {
+      req.parameter.data = JSON.stringify(params.data);
+    } else {
+      req.parameter = params;
+    }
+
+    if (action === "insert") return response().json(Insert(req, table));
+    if (action === "update") return response().json(Update(req, table));
+    if (action === "read")   return response().json(Read(req, table));
+    if (action === "delete") return response().json(Delete(req, table));
+
+    return response().json({success:false, data:{error:"Unknown action"}});
+  } catch (err) {
+    return response().json({success:false, data:{error:String(err)}});
+  }
+}
+
+/* ---------- Core Functions ---------- */
+
+function Read(request, table) {
+  var request_id = Number(request.parameter.id);
+  return {
+    success: true,
+    data: _read(table, request_id)
+  };
+}
+
+function Insert(request, table) {
+  var last_col  = table.getLastColumn();
+  var first_row = table.getRange(1, 1, 1, last_col).getValues();
+  var headers   = first_row[0];
+  var data      = JSON.parse(request.parameter.data);
+  var new_row;
+  var result = {};
+
+  try {
+    new_row = prepareRow(data, headers);
+    table.appendRow(new_row);
+
+    result.success = true;
+    result.data = data;
+  } catch (error) {
+    result.success = false;
+    result.data = { error: error.message };
+  }
+  return result;
+}
+
+function Update(request, table) {
+  var last_col   = table.getLastColumn();
+  var first_row  = table.getRange(1, 1, 1, last_col).getValues();
+  var headers    = first_row[0];
+  var request_id = Number(request.parameter.id);
+  var current_data = _read(table, request_id);
+  var data = JSON.parse(request.parameter.data);
+  var result = {};
+
+  try {
+    var current_row = current_data.row;
+    for (var object_key in data) {
+      var current_col = headers.indexOf(object_key) + 1;
+      table.getRange(current_row, current_col).setValue(data[object_key]);
+      current_data[object_key] = data[object_key];
+    }
+    result.success = true;
+    result.data = current_data;
+  } catch (error) {
+    result.success = false;
+    result.data = { error: error.message };
+  }
+
+  return result;
+}
+
+function Delete(request, table) {
+  var request_id   = Number(request.parameter.id);
+  var current_data = _read(table, request_id);
+  table.deleteRow(current_data.row);
+  return response().json({ success: true, data: current_data });
+}
+
+/* ---------- Utilities ---------- */
+
+function response() {
+  return {
+    json: function(data) {
+      return ContentService.createTextOutput(JSON.stringify(data))
+        .setMimeType(ContentService.MimeType.JSON);
+    },
+    jsonp: function(req, data) {
+      return ContentService.createTextOutput(
+        req.parameters.callback + '(' + JSON.stringify(data) + ')'
+      ).setMimeType(ContentService.MimeType.JAVASCRIPT);
+    }
+  };
+}
+
+function _read(sheet, id) {
+  var data   = sheet.getDataRange().getValues();
+  var header = data.shift();
+
+  var result = data.map(function(row, idx) {
+    var reduced = header.reduce(function(acc, curr, i) {
+      acc[curr] = row[i];
+      return acc;
+    }, {});
+    reduced.row = idx + 2;
+    return reduced;
+  });
+
+  if (id) {
+    var filtered = result.filter(function(record) { return record.id === id; });
+    return filtered.shift();
+  }
+  return result;
+}
+
+function prepareRow(obj, headers) {
+  var arr = [];
+  for (var i = 0; i < headers.length; i++) {
+    var key = headers[i];
+    var value = obj[key] || "";
+    arr.push(value);
+  }
+  return arr;
+}
+
+
+/* ---------- Email Sender (Bilingual) ---------- */
+function sendMail(email, lang) {
+  if (!email) return;
+  var ok = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+  if (!ok) return;
+
+  lang = (lang || 'en').toLowerCase();
+
+  var subject, bodyHtml;
+  if (lang === 'ko') {
+    subject = '뉴스랭킹 얼리엑세스 신청 감사합니다';
+    bodyHtml = `
+      <html>
+        <p>안녕하세요,</p>
+        <p><b>뉴스랭킹</b> 얼리엑세스를 신청해 주셔서 감사합니다.<br>
+        서비스가 개시되면 가장 먼저 알려드릴게요.</p>
+        <p>기능 제안을 남겨주셨다면 감사드리며 내부 검토에 반영하겠습니다.</p>
+        <p>— 뉴스랭킹 팀</p>
+      </html>`;
+  } else {
+    subject = 'Thanks for requesting Early Access to NewsRanking';
+    bodyHtml = `
+      <html>
+        <p>Hi there,</p>
+        <p>Thanks for requesting early access to <b>NewsRanking</b>. We'll let you know as soon as the service launches.</p>
+        <p>If you shared a suggestion/idea, we really appreciate it and will review it!</p>
+        <p>— The NewsRanking Team</p>
+      </html>`;
+  }
+
+  MailApp.sendEmail({
+    to: email,
+    subject: subject,
+    htmlBody: bodyHtml
+  });
+}
+
+
+
+function NateTop5(req) {
+  var sc   = req.parameter.sc   || req.parameter.bunya || "eco";
+  var date = req.parameter.date || "20221109";
+
+  var url = "https://news.nate.com/rank/pop?sc="
+            + encodeURIComponent(sc)
+            + "&p=day&date="
+            + encodeURIComponent(date);
+
+  try {
+    var res  = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true,
+      followRedirects: true,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; GoogleAppsScript/1.0)"
+      }
+    });
+    var code = res.getResponseCode();
+    if (code !== 200) {
+      return { success:false, data:{ error:"HTTP " + code } };
+    }
+
+    var html;
+    try {
+      html = res.getContentText("euc-kr");
+    } catch (e) {
+      html = res.getContentText();
+    }
+
+    var titles = [];
+    // 🔁 어떤 태그든 class에 'tit'가 들어가면 잡도록 수정
+    var regex = /<[^>]*class="[^"]*tit[^"]*"[^>]*>([\s\S]*?)<\/[^>]+>/gi;
+    var match;
+    while ((match = regex.exec(html)) !== null) {
+      var text = match[1];
+      text = text.replace(/<[^>]+>/g, "");       // 안쪽 태그 제거
+      text = text
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (text) titles.push(text);
+      if (titles.length >= 7) break;            // Top 5만
+    }
+    // 🔻 여기 추가
+    if (titles.length > 2) {
+      titles = titles.slice(2);        // 0,1 버리고 2~ 이후만 사용
+    } else {
+      titles = [];
+    }
+
+    Logger.log("NateTop5 " + sc + " " + date + " count=" + titles.length);
+
+    return {
+      success: true,
+      data: {
+        sc: sc,
+        date: date,
+        titles: titles
+      }
+    };
+
+  } catch (err) {
+    return {
+      success: false,
+      data: { error: String(err) }
+    };
+  }
+}
+
+
+function testNateAuth() {
+  var result = NateTop5({
+    parameter: {
+      sc: "eco",
+      date: "20221212"
+    }
+  });
+  Logger.log(JSON.stringify(result, null, 2));
+}
+
+function testNateAuthRaw() {
+  var url = "https://news.nate.com/rank/pop?sc=eco&p=day&date=20221212";
+  var res = UrlFetchApp.fetch(url);    
+  Logger.log(res.getResponseCode());
+}
+
