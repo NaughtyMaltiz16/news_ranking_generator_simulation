@@ -154,5 +154,3 @@ function testNateAuthRaw() {
 2. VS Code에서 **Open Live Server**로 실행
 
 ---
-
-으로도 재작성해줄게!
