@@ -252,15 +252,17 @@
         );
       }
 
-      // ① 여기 ↓↓↓ 이 블록이 방문자 기록용
-      (function logVisitor() {
+      let clientIp = "";
+
+      function logVisitor() {
         const data = {
           id: getUVfromCookie(),
           landingUrl: window.location.href,
           referer: document.referrer || "",
           time_stamp: getTimeStamp(),
           utm: window.location.search || "",
-          device: mobile
+          device: mobile,
+          ip: clientIp || ""   
         };
 
         axios.get(
@@ -274,8 +276,16 @@
         .catch(function(err){
           console.error("visitor log error", err);
         });
-      })();
-      // ① 여기까지
+      }
+
+      $.getJSON("https://api.ipify.org?format=jsonp&callback=?", function(res) {
+        if (res && res.ip) {
+          clientIp = res.ip;
+        }
+        logVisitor();  
+      }).fail(function() {
+        logVisitor();
+      });
 
       function sendReaction(kind) {
         const data = {
@@ -913,3 +923,4 @@
   </script>
 </body>
 </html>
+
