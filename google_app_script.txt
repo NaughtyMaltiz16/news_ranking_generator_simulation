@@ -1,4 +1,5 @@
 function doGet(req) {
+  Logger.log(JSON.stringify(req.context, null, 2));
   var SHEET_URL = "https://docs.google.com/spreadsheets/d/1PSI6PQf0wLpldAF13AT7SLgY99Ncbz-JZmN-IOf-jfY/edit";
   var action    = req.parameter.action;
 
@@ -11,6 +12,7 @@ function doGet(req) {
       return response().json(nateResult);
     }
   }
+
 
   var table_req = req.parameter.table;
 
@@ -101,6 +103,10 @@ function Insert(request, table) {
   try {
     new_row = prepareRow(data, headers);
     table.appendRow(new_row);
+
+    if (table.getName().toLowerCase() === "tab_final" && data.email) {
+      sendMail(data.email, data.lang);
+    }
 
     result.success = true;
     result.data = data;
@@ -314,8 +320,8 @@ function testNateAuth() {
 }
 
 function testNateAuthRaw() {
+  // NateTop5 말고, UrlFetchApp.fetch를 직접 호출 (try/catch 없이!)
   var url = "https://news.nate.com/rank/pop?sc=eco&p=day&date=20221212";
   var res = UrlFetchApp.fetch(url);    
   Logger.log(res.getResponseCode());
 }
-
