@@ -1,6 +1,6 @@
 function doGet(req) {
   Logger.log(JSON.stringify(req.context, null, 2));
-  var SHEET_URL = "https://docs.google.com/spreadsheets/d/1PSI6PQf0wLpldAF13AT7SLgY99Ncbz-JZmN-IOf-jfY/edit";
+  var SHEET_URL = "https://docs.google.com/spreadsheets/d/1Ezs4LYrDY03EZlpzRDHyphNU1YzLBkZIYkMyqfUdZU4/edit";
   var action    = req.parameter.action;
 
 
